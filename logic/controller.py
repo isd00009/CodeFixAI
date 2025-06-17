@@ -31,24 +31,34 @@ class Controller:
             return "Java"
         return ""
 
-    def build_prompt(self, texto: str) -> str:
+    def build_prompt(self, texto: str, mode: str) -> str:
         """
         Construye un prompt que pida únicamente el código corregido,
         sin explicaciones, listo para copiar y pegar.
         """
         lang = self.detect_language(texto)
-        base = (
-            "Corrige los errores de sintaxis y estilo del siguiente "
-            "fragmento de código"
-        )
+        if mode == "optimization":
+            base = (
+                "Refactoriza, simplifica e intenta optimizar el siguiente fragmento de código"
+            )
+        else:
+            base = (
+                "Corrige los errores de sintaxis y estilo del siguiente fragmento de código"
+            )
         if lang:
             base += f" en {lang}"
         base += ":\n"
         base += f"```{texto}```\n\n"
-        base += (
-            "Devuélveme únicamente el código corregido, listo para copiar "
-            "y pegar en mi editor, sin explicaciones ni comentarios adicionales."
-        )
+        if mode == "optimization":
+            base += (
+                "Devuélveme únicamente el código optimizado y refactorizado, "
+                "listo para copiar y pegar en mi editor, sin explicaciones."
+            )
+        else:
+            base += (
+                "Devuélveme únicamente el código corregido, listo para copiar "
+                "y pegar en mi editor, sin explicaciones adicionales."
+            )
         return base
 
     def send_to_openai(self, prompt: str) -> str:
