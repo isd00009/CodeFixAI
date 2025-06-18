@@ -1,11 +1,12 @@
 # ui/main_window.py
 import os
 import re
+import datetime
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QGroupBox, QLabel, QLineEdit, QPushButton,
     QRadioButton, QPlainTextEdit, QListWidget, QListWidgetItem,
     QStackedWidget, QHBoxLayout, QVBoxLayout,
-    QMessageBox, QApplication, QFileDialog
+    QMessageBox, QApplication, QFileDialog, QDialog
 )
 from PyQt5.QtGui import QFont, QColor
 from PyQt5.QtCore import Qt
@@ -27,6 +28,9 @@ class MainWindow(QMainWindow):
         self.dir_files = []
         self.current_file_index = -1
 
+        # Para guardar los originales históricos
+        self.orig_map = {}
+
         # Resultados multi-archivo
         self.corrected_map = {}
         self.diff_map = {}
@@ -39,6 +43,9 @@ class MainWindow(QMainWindow):
         # Modos
         self.diff_mode = False
         self.paste_mode = True
+
+        # Historial de ejecuciones
+        self.history = []  # cada entry guarda orig_map, corrected_map, diff_map, etc.
 
         self.setWindowTitle("CodeFixAI")
         self.resize(1280, 720)
@@ -54,7 +61,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
 
-        # Zona superior
+        # Zona superior: API key, guardar, historial, modo
         top = QHBoxLayout()
         api_g = QGroupBox()
         api_l = QHBoxLayout(api_g)
@@ -64,6 +71,8 @@ class MainWindow(QMainWindow):
         api_l.addWidget(self.api_line)
         self.btn_save = QPushButton("Guardar")
         api_l.addWidget(self.btn_save)
+        self.btn_history = QPushButton("Historial")
+        api_l.addWidget(self.btn_history)
         top.addWidget(api_g)
 
         mode_g = QGroupBox()
@@ -75,6 +84,7 @@ class MainWindow(QMainWindow):
         mode_l.addWidget(self.radio_correct)
         mode_l.addWidget(self.radio_opt)
         top.addWidget(mode_g)
+
         main_layout.addLayout(top)
 
         # Zona central
@@ -84,7 +94,6 @@ class MainWindow(QMainWindow):
         code_g = QGroupBox("CÓDIGO")
         code_l = QVBoxLayout(code_g)
         self.txt_code = QPlainTextEdit()
-        # Detectar cambios para activar paste_mode
         self.txt_code.textChanged.connect(self.on_code_changed)
         code_l.addWidget(self.txt_code)
         self.btn_open_file = QPushButton("Abrir fichero…")
@@ -129,23 +138,28 @@ class MainWindow(QMainWindow):
             b.setEnabled(False)
             nav_res.addWidget(b)
         res_l.addLayout(nav_res)
+        # Botones Copiar / Mostrar diff / Guardar
         btns = QHBoxLayout()
         self.btn_copy = QPushButton("Copiar")
         self.btn_diff = QPushButton("Mostrar diff")
         self.btn_diff.setEnabled(False)
+        self.btn_save_file = QPushButton("Guardar resultado")
+        self.btn_save_file.setEnabled(False)
         btns.addWidget(self.btn_copy)
         btns.addWidget(self.btn_diff)
+        btns.addWidget(self.btn_save_file)
         res_l.addLayout(btns)
         center.addWidget(res_g, stretch=3)
 
         main_layout.addLayout(center)
 
-        # Inicializar estados
+        # Estados iniciales
         self.btn_execute.setEnabled(False)
         self.btn_copy.setEnabled(False)
 
         # Conectar señales
         self.btn_save.clicked.connect(self.on_save_api)
+        self.btn_history.clicked.connect(self.on_show_history)
         self.btn_open_file.clicked.connect(self.on_open_file)
         self.btn_open_dir.clicked.connect(self.on_open_dir)
         self.btn_prev_file.clicked.connect(self.on_prev_file)
@@ -155,19 +169,19 @@ class MainWindow(QMainWindow):
         self.btn_execute.clicked.connect(self.on_execute)
         self.btn_copy.clicked.connect(self.on_copy)
         self.btn_diff.clicked.connect(self.on_show_diff)
+        self.btn_save_file.clicked.connect(self.on_save_file_result)
 
     def on_code_changed(self):
-        """El usuario ha editado el texto: volvemos a paste_mode."""
+        """El usuario editó texto: volvemos a paste_mode."""
         self.paste_mode = True
         self.dir_files.clear()
         self.current_file_index = -1
         self._update_file_nav()
-        # No tocamos RESULTADO para mantener lo anterior si ya existía
 
     def on_save_api(self):
         key = self.api_line.text().strip()
         if not self.controller.validate_api_key(key):
-            QMessageBox.warning(self, "Clave inválida", "Clave de API ≥ 20 caracteres.")
+            QMessageBox.warning(self, "Clave inválida", "Clave ≥ 20 caracteres.")
             return
         try:
             self.controller.save_api_key(key)
@@ -183,7 +197,6 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
-        # Modo archivos
         self.paste_mode = False
         self.dir_files = [path]
         self.current_file_index = 0
@@ -212,7 +225,6 @@ class MainWindow(QMainWindow):
         if not files:
             QMessageBox.information(self, "Sin ficheros", "No se encontraron archivos de código.")
             return
-        # Modo archivos
         self.paste_mode = False
         self.dir_files = sorted(files)
         self.current_file_index = 0
@@ -229,7 +241,7 @@ class MainWindow(QMainWindow):
         self.btn_execute.setEnabled(True)
 
     def _display_initial_file(self, path):
-        """Carga el archivo en txt_code y limpia resultados."""
+        """Carga archivo en txt_code y limpia resultados."""
         try:
             text = open(path, "r", encoding="utf-8").read()
         except Exception as e:
@@ -238,20 +250,27 @@ class MainWindow(QMainWindow):
         self.txt_code.blockSignals(True)
         self.txt_code.setPlainText(text)
         self.txt_code.blockSignals(False)
-        # Limpiar resultados solo aquí
         self.page_code.clear()
         self.page_diff.clear()
         self.stack.setCurrentIndex(0)
         self.btn_diff.setEnabled(False)
         self.btn_copy.setEnabled(False)
+        self.btn_save_file.setEnabled(False)
 
     def _load_code_file(self, path):
-        """Carga el archivo solo en el panel de CÓDIGO, sin tocar RESULTADO."""
-        try:
-            text = open(path, "r", encoding="utf-8").read()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo leer {path}:\n{e}")
-            return
+        """
+        Navegación en CÓDIGO: si hay orig_map,
+        carga ese texto; si no, lee desde disco.
+        """
+        if not self.paste_mode and path in self.orig_map:
+            text = self.orig_map[path]
+        else:
+            try:
+                text = open(path, "r", encoding="utf-8").read()
+            except Exception as e:
+                QMessageBox.critical(self, "Error",
+                                     f"No se pudo leer {path}:\n{e}")
+                return
         self.txt_code.blockSignals(True)
         self.txt_code.setPlainText(text)
         self.txt_code.blockSignals(False)
@@ -281,25 +300,27 @@ class MainWindow(QMainWindow):
             self._load_code_file(self.dir_files[self.current_file_index])
 
     def on_execute(self):
+        import datetime
+
         code = self.txt_code.toPlainText().strip()
         if not code:
-            QMessageBox.warning(self, "Sin entrada", "Pega o carga un fragmento primero.")
+            QMessageBox.warning(self, "Sin entrada",
+                                "Pega o carga un fragmento de código primero.")
             return
 
-        # Determinar modo según el radio seleccionado
         mode = "optimization" if self.radio_opt.isChecked() else "correction"
-
-        # Desactivamos botón y mostramos spinner
         self.btn_execute.setEnabled(False)
-        if not self.paste_mode and len(self.dir_files) > 1:
-            self.lbl_spinner.setText("Procesando todos…")
-        else:
-            self.lbl_spinner.setText("Procesando…")
+        self.lbl_spinner.setText(
+            "Procesando todos…" if (not self.paste_mode and len(self.dir_files) > 1)
+            else "Procesando…"
+        )
         QApplication.processEvents()
+
+        # Preparamos orig_map para esta ejecución
+        self.orig_map = {}
 
         try:
             if self.paste_mode:
-                # Modo pegado único
                 prompt = self.controller.build_prompt(code, mode)
                 raw = self.controller.send_to_openai(prompt)
                 clean = self.controller.extract_code(raw)
@@ -307,9 +328,9 @@ class MainWindow(QMainWindow):
                 self.paste_diff = self.controller.generar_diff(code, clean)
                 self.current_result_index = 0
             else:
-                # Modo multi-archivo
                 for path in self.dir_files:
                     orig = open(path, "r", encoding="utf-8").read()
+                    self.orig_map[path] = orig
                     prompt = self.controller.build_prompt(orig, mode)
                     raw = self.controller.send_to_openai(prompt)
                     clean = self.controller.extract_code(raw)
@@ -317,7 +338,22 @@ class MainWindow(QMainWindow):
                     self.diff_map[path] = self.controller.generar_diff(orig, clean)
                 self.current_result_index = 0
 
-            # Reset de diff_mode y mostrar primer resultado
+            # Guardar en historial
+            entry = {
+                "timestamp": datetime.datetime.now(),
+                "mode": mode,
+                "paste_mode": self.paste_mode,
+                "dir_files": list(self.dir_files),
+                "orig_map": dict(self.orig_map),
+                "corrected_map": dict(self.corrected_map),
+                "diff_map": dict(self.diff_map),
+                "paste_original": code,
+                "paste_clean": self.paste_clean,
+                "paste_diff": list(self.paste_diff),
+            }
+            self.history.append(entry)
+
+            # reset de diff y mostrar primer resultado
             self.diff_mode = False
             self.btn_diff.setText("Mostrar diff")
             self._show_current_result()
@@ -326,11 +362,11 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error en la petición", str(e))
         finally:
-            # Restaurar estado de la interfaz
             self.lbl_spinner.setText("")
             self.btn_execute.setEnabled(True)
             self.btn_diff.setEnabled(True)
             self.btn_copy.setEnabled(True)
+            self.btn_save_file.setEnabled(True)
 
     def on_prev_result(self):
         if self.current_result_index > 0:
@@ -352,7 +388,6 @@ class MainWindow(QMainWindow):
         if idx < 0:
             return
         if self.diff_mode:
-            # Mostrar diff
             self.page_diff.clear()
             lines = (
                 self.diff_map.get(self.dir_files[idx], [])
@@ -375,11 +410,7 @@ class MainWindow(QMainWindow):
                 self.page_diff.addItem(item)
             self.stack.setCurrentIndex(1)
         else:
-            # Mostrar código corregido
-            if self.paste_mode:
-                text = self.paste_clean
-            else:
-                text = self.corrected_map.get(self.dir_files[idx], "")
+            text = self.paste_clean if self.paste_mode else self.corrected_map.get(self.dir_files[idx], "")
             self.page_code.setPlainText(text)
             self.stack.setCurrentIndex(0)
 
@@ -397,3 +428,117 @@ class MainWindow(QMainWindow):
         self.diff_mode = not self.diff_mode
         self.btn_diff.setText("Mostrar código" if self.diff_mode else "Mostrar diff")
         self._show_current_result()
+
+    def on_save_file_result(self):
+        """Guardar el código corregido/optimizado actual a un fichero, sugiriendo la extensión correcta."""
+        if self.diff_mode:
+            QMessageBox.warning(self, "Guardar", "Desactiva el diff para guardar el código.")
+            return
+
+        text = self.paste_clean if self.paste_mode else self.corrected_map.get(
+            self.dir_files[self.current_result_index], ""
+        )
+        if not text:
+            QMessageBox.warning(self, "Guardar", "No hay código para guardar.")
+            return
+
+        lang = self.controller.detect_language(text)
+        if lang == "Python":
+            filter_str = "Python (*.py);;Todos (*.*)"
+        elif lang == "C++":
+            filter_str = "C++ (*.cpp *.h);;Todos (*.*)"
+        elif lang == "Java":
+            filter_str = "Java (*.java);;Todos (*.*)"
+        else:
+            filter_str = "Todos (*.*)"
+
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, "Guardar resultado", "", filter_str
+        )
+        if not save_path:
+            return
+
+        try:
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write(text)
+        except Exception as e:
+            QMessageBox.critical(self, "Error al guardar", str(e))
+        else:
+            QMessageBox.information(self, "Guardado", f"Resultado guardado en:\n{save_path}")
+
+    def on_show_history(self):
+        from PyQt5.QtWidgets import QDialog
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Historial de ejecuciones")
+        layout = QVBoxLayout(dialog)
+
+        # Lista de entradas de historial
+        list_w = QListWidget()
+        for entry in self.history:
+            ts = entry["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+            if entry["paste_mode"]:
+                label = f"{ts} — Paste ({entry['mode']})"
+            else:
+                cnt = len(entry["dir_files"])
+                label = f"{ts} — {cnt} archivos ({entry['mode']})"
+            list_w.addItem(label)
+        layout.addWidget(list_w)
+
+        # Botones Cargar / Eliminar / Cerrar
+        btns = QHBoxLayout()
+        btn_load = QPushButton("Cargar")
+        btn_del = QPushButton("Eliminar")
+        btn_close = QPushButton("Cerrar")
+        btns.addWidget(btn_load)
+        btns.addWidget(btn_del)
+        btns.addWidget(btn_close)
+        layout.addLayout(btns)
+
+        def load_selected():
+            idx = list_w.currentRow()
+            if idx < 0:
+                return
+            entry = self.history[idx]
+
+            # Restaurar flags y mapas
+            self.paste_mode = entry["paste_mode"]
+            self.dir_files = list(entry["dir_files"])
+            self.orig_map = dict(entry["orig_map"])
+            self.corrected_map = dict(entry["corrected_map"])
+            self.diff_map = dict(entry["diff_map"])
+            self.paste_clean = entry["paste_clean"]
+            self.paste_diff = list(entry["paste_diff"])
+            self.current_file_index = 0
+            self.current_result_index = 0
+            self.diff_mode = False
+            self.btn_diff.setText("Mostrar diff")
+
+            # Actualizar navegación
+            self._update_file_nav()
+            self._update_result_nav()
+
+            # Mostrar el original correcto en el panel CÓDIGO
+            if self.paste_mode:
+                self.txt_code.setPlainText(entry["paste_original"])
+            else:
+                # navegamos con nuestro método que respeta orig_map
+                self._load_code_file(self.dir_files[0])
+
+            # Mostrar el resultado histórico (código corregido)
+            self._show_current_result()
+
+            dialog.accept()
+
+        def del_selected():
+            idx = list_w.currentRow()
+            if idx < 0:
+                return
+            self.history.pop(idx)
+            list_w.takeItem(idx)
+
+        btn_load.clicked.connect(load_selected)
+        btn_del.clicked.connect(del_selected)
+        btn_close.clicked.connect(dialog.reject)
+
+        dialog.exec_()
