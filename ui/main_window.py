@@ -93,6 +93,9 @@ class MainWindow(QMainWindow):
         # Panel CÓDIGO
         code_g = QGroupBox("CÓDIGO")
         code_l = QVBoxLayout(code_g)
+        self.lbl_code_filename = QLabel("")
+        self.lbl_code_filename.setAlignment(Qt.AlignCenter)
+        code_l.addWidget(self.lbl_code_filename)
         self.txt_code = QPlainTextEdit()
         self.txt_code.textChanged.connect(self.on_code_changed)
         code_l.addWidget(self.txt_code)
@@ -120,6 +123,9 @@ class MainWindow(QMainWindow):
         # Panel RESULTADO
         res_g = QGroupBox("RESULTADO")
         res_l = QVBoxLayout(res_g)
+        self.lbl_result_filename = QLabel("")
+        self.lbl_result_filename.setAlignment(Qt.AlignCenter)
+        res_l.addWidget(self.lbl_result_filename)
         self.stack = QStackedWidget()
         self.page_code = QPlainTextEdit()
         self.page_code.setReadOnly(True)
@@ -177,6 +183,8 @@ class MainWindow(QMainWindow):
         self.dir_files.clear()
         self.current_file_index = -1
         self._update_file_nav()
+        self._update_code_filename()
+        self._update_result_filename()
 
     def on_save_api(self):
         key = self.api_line.text().strip()
@@ -255,7 +263,7 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(0)
         self.btn_diff.setEnabled(False)
         self.btn_copy.setEnabled(False)
-        self.btn_save_file.setEnabled(False)
+        self._update_code_filename()
 
     def _load_code_file(self, path):
         """
@@ -274,6 +282,7 @@ class MainWindow(QMainWindow):
         self.txt_code.blockSignals(True)
         self.txt_code.setPlainText(text)
         self.txt_code.blockSignals(False)
+        self._update_code_filename()
 
     def _update_file_nav(self):
         n, idx = len(self.dir_files), self.current_file_index
@@ -287,17 +296,35 @@ class MainWindow(QMainWindow):
         self.btn_prev_res.setEnabled(ok and idx > 0)
         self.btn_next_res.setEnabled(ok and idx < n - 1)
 
+    def _update_code_filename(self):
+        """Actualiza la etiqueta con el nombre del fichero en el panel CÓDIGO."""
+        if not self.paste_mode and self.dir_files:
+            name = os.path.basename(self.dir_files[self.current_file_index])
+            self.lbl_code_filename.setText(name)
+        else:
+            self.lbl_code_filename.setText("Editor de código")
+
+    def _update_result_filename(self):
+        """Actualiza la etiqueta con el nombre del fichero en el panel RESULTADO."""
+        if not self.paste_mode and self.dir_files and self.current_result_index >= 0:
+            name = os.path.basename(self.dir_files[self.current_result_index])
+            self.lbl_result_filename.setText(name)
+        else:
+            self.lbl_result_filename.setText("Salida de IA")
+
     def on_prev_file(self):
         if self.current_file_index > 0:
             self.current_file_index -= 1
             self._update_file_nav()
             self._load_code_file(self.dir_files[self.current_file_index])
+            self._update_code_filename()
 
     def on_next_file(self):
         if self.current_file_index < len(self.dir_files) - 1:
             self.current_file_index += 1
             self._update_file_nav()
             self._load_code_file(self.dir_files[self.current_file_index])
+            self._update_code_filename()
 
     def on_execute(self):
         import datetime
@@ -374,6 +401,7 @@ class MainWindow(QMainWindow):
             self._show_current_result()
             self._update_result_nav()
         self.stack.currentWidget().setFocus()
+        self._update_result_filename()
 
     def on_next_result(self):
         max_idx = len(self.dir_files) - 1 if not self.paste_mode else 0
@@ -382,11 +410,13 @@ class MainWindow(QMainWindow):
             self._show_current_result()
             self._update_result_nav()
         self.stack.currentWidget().setFocus()
+        self._update_result_filename()
 
     def _show_current_result(self):
         idx = self.current_result_index
         if idx < 0:
             return
+        self._update_result_filename()
         if self.diff_mode:
             self.page_diff.clear()
             lines = (
