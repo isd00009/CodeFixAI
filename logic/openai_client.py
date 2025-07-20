@@ -15,7 +15,7 @@ class OpenAIClient:
             "messages": [
                 {"role": "user", "content": prompt}
             ],
-            "max_tokens": 1024,
+            "max_tokens": 2048,
             "temperature": 0.0
         }
         resp = requests.post(self.endpoint, json=payload, headers=self.headers, timeout=30)
