@@ -201,7 +201,7 @@ class MainWindow(QMainWindow):
 
     def on_open_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Seleccionar fichero", "", "Código (*.py *.cpp *.c *.java);;Todos (*.*)"
+            self, "Seleccionar fichero", "", "Código (*.py *.cpp *.c *.java *.js);;Todos (*.*)"
         )
         if not path:
             return
