@@ -224,7 +224,7 @@ class MainWindow(QMainWindow):
         dirpath = QFileDialog.getExistingDirectory(self, "Seleccionar directorio", "")
         if not dirpath:
             return
-        exts = {".py", ".cpp", ".c", ".h", ".java"}
+        exts = {".py", ".cpp", ".c", ".h", ".java", ".js"}
         files = []
         for root, _, fnames in os.walk(dirpath):
             for f in fnames:
